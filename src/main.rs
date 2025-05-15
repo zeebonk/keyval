@@ -1,8 +1,13 @@
+#![allow(dead_code)]
 use anyhow::{Ok, Result};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs::File, io::{BufReader, Seek, SeekFrom, Write}};
-use std::io::{self, BufRead};
-
+use std::io::BufRead;
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{BufReader, Seek, Write},
+    slice::Iter,
+};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 enum Command {
@@ -29,20 +34,14 @@ struct InMemoryWriteAheadLog {
 }
 
 struct InMemoryReplayIterator<'a> {
-    write_ahead_log: &'a InMemoryWriteAheadLog,
-    cur: usize,
+    iter: Iter<'a, Transaction>,
 }
 
-impl<'a> Iterator for InMemoryReplayIterator<'a> {
+impl Iterator for InMemoryReplayIterator<'_> {
     type Item = Transaction;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.cur == self.write_ahead_log.data.len() {
-            return None
-        }
-        let result = self.write_ahead_log.data[self.cur].clone();
-        self.cur += 1;
-        Some(result)
+        self.iter.next().cloned()
     }
 }
 
@@ -52,7 +51,9 @@ impl InMemoryWriteAheadLog {
     }
 
     fn replay(&mut self) -> InMemoryReplayIterator {
-        InMemoryReplayIterator { write_ahead_log: self, cur: 0 }
+        InMemoryReplayIterator {
+            iter: self.data.iter(),
+        }
     }
 }
 
@@ -97,7 +98,9 @@ impl OnDiskWriteAheadLog {
     }
     fn replay(&mut self) -> OnDiskReplayIterator {
         let _ = self.file.rewind();
-        OnDiskReplayIterator { reader: BufReader::new(&mut self.file) }
+        OnDiskReplayIterator {
+            reader: BufReader::new(&mut self.file),
+        }
     }
 }
 
@@ -176,10 +179,10 @@ impl<W: WriteAheadLog> Server<W> {
 
 fn main() -> Result<()> {
     // In memory
-    //let w = InMemoryWriteAheadLog::new();
+    let w = InMemoryWriteAheadLog::new();
 
     // On disk
-    let w = OnDiskWriteAheadLog::new(File::options().create(true).read(true).write(true).open("wal.txt")?);
+    //let w = OnDiskWriteAheadLog::new(File::options().create(true).read(true).write(true).open("wal.txt")?);
 
     let mut s = Server::new(w);
 
@@ -187,7 +190,7 @@ fn main() -> Result<()> {
     println!("{}", s.execute("GET my_key")?);
 
     for x in s.write_ahead_log.replay() {
-        println!("{:?}", x);
+        println!("REPLAY: {:?}", x);
     }
 
     s.execute("SET somekey 4")?;
