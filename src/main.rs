@@ -38,10 +38,10 @@ struct InMemoryReplayIterator<'a> {
 }
 
 impl Iterator for InMemoryReplayIterator<'_> {
-    type Item = Transaction;
+    type Item = Result<Transaction>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().cloned()
+        self.iter.next().cloned().map(Ok)
     }
 }
 
@@ -72,21 +72,30 @@ struct OnDiskWriteAheadLog {
 }
 struct OnDiskReplayIterator<'a> {
     reader: BufReader<&'a mut File>,
+    error: bool,
 }
 
 impl Iterator for OnDiskReplayIterator<'_> {
-    type Item = Transaction;
+    type Item = Result<Transaction>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.error {
+            return None;
+        }
+
         let mut buffer = String::new();
-        let result = self.reader.read_line(&mut buffer);
-        match result {
-            Result::Ok(length) if length > 0 => {
-                Some(serde_json::from_str(buffer.as_str()).unwrap())
-            }
-            _ => {
-                println!("{:?}", result);
-                None
+        match self.reader.read_line(&mut buffer) {
+            Result::Ok(length) if length > 0 => match serde_json::from_str(&buffer) {
+                Result::Ok(t) => Some(Result::Ok(t)),
+                Result::Err(e) => {
+                    self.error = true;
+                    Some(Result::Err(e.into()))
+                }
+            },
+            Result::Ok(_) => None,
+            Result::Err(e) => {
+                self.error = true;
+                Some(Result::Err(e.into()))
             }
         }
     }
@@ -100,6 +109,7 @@ impl OnDiskWriteAheadLog {
         let _ = self.file.rewind();
         OnDiskReplayIterator {
             reader: BufReader::new(&mut self.file),
+            error: false,
         }
     }
 }
@@ -119,18 +129,15 @@ struct State {
 
 impl State {
     fn apply(&mut self, transaction: &Transaction) -> String {
-        let result = match &transaction.command {
+        let default = "".into();
+        match &transaction.command {
             Command::Set { key, value } => {
                 self.kv.insert(key.into(), value.into());
-                ""
+                default
             }
-            Command::Get { key } => {
-                let result = self.kv.get(key);
-                result.unwrap()
-            }
-            _ => "",
-        };
-        result.into()
+            Command::Get { key } => self.kv.get(key).unwrap_or(&default).into(),
+            _ => default,
+        }
     }
 }
 
@@ -179,10 +186,17 @@ impl<W: WriteAheadLog> Server<W> {
 
 fn main() -> Result<()> {
     // In memory
-    let w = InMemoryWriteAheadLog::new();
+    // let w = InMemoryWriteAheadLog::new();
 
     // On disk
-    //let w = OnDiskWriteAheadLog::new(File::options().create(true).read(true).write(true).open("wal.txt")?);
+    let w = OnDiskWriteAheadLog::new(
+        File::options()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open("wal.txt")?,
+    );
 
     let mut s = Server::new(w);
 
