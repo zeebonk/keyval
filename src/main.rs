@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use anyhow::{Ok, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
 use std::{
@@ -93,17 +93,17 @@ impl Iterator for OnDiskReplayIterator<'_> {
 
         let mut buffer = String::new();
         match self.reader.read_line(&mut buffer) {
-            Result::Ok(length) if length > 0 => match serde_json::from_str(&buffer) {
-                Result::Ok(t) => Some(Result::Ok(t)),
-                Result::Err(e) => {
+            Ok(length) if length > 0 => match serde_json::from_str(&buffer) {
+                Ok(t) => Some(Ok(t)),
+                Err(e) => {
                     self.error = true;
-                    Some(Result::Err(e.into()))
+                    Some(Err(e.into()))
                 }
             },
-            Result::Ok(_) => None,
-            Result::Err(e) => {
+            Ok(_) => None,
+            Err(e) => {
                 self.error = true;
-                Some(Result::Err(e.into()))
+                Some(Err(e.into()))
             }
         }
     }
@@ -175,7 +175,7 @@ impl<W: WriteAheadLog> Server<W> {
             self.transaction_id = transaction.id;
         }
         self.transaction_id += 1;
-        Result::Ok(())
+        Ok(())
     }
 
     fn execute(&mut self, query: &str) -> Result<String> {
