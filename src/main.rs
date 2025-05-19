@@ -23,6 +23,12 @@ struct Transaction {
 }
 
 trait WriteAheadLog {
+    type ReplayIterator<'a>: Iterator<Item = Result<Transaction>> + 'a
+    where
+        Self: 'a;
+
+    fn replay(&mut self) -> Self::ReplayIterator<'_>;
+
     fn append(&mut self, transaction: &Transaction) -> Result<()>;
 }
 
@@ -49,18 +55,20 @@ impl InMemoryWriteAheadLog {
     fn new() -> Self {
         Self { data: vec![] }
     }
-
-    fn replay(&mut self) -> InMemoryReplayIterator {
-        InMemoryReplayIterator {
-            iter: self.data.iter(),
-        }
-    }
 }
 
 impl WriteAheadLog for InMemoryWriteAheadLog {
+    type ReplayIterator<'a> = InMemoryReplayIterator<'a>;
+
     fn append(&mut self, transaction: &Transaction) -> Result<()> {
         self.data.push(transaction.clone());
         Ok(())
+    }
+
+    fn replay(&mut self) -> Self::ReplayIterator<'_> {
+        InMemoryReplayIterator {
+            iter: self.data.iter(),
+        }
     }
 }
 
@@ -105,20 +113,23 @@ impl OnDiskWriteAheadLog {
     fn new(f: File) -> Self {
         Self { file: f }
     }
-    fn replay(&mut self) -> OnDiskReplayIterator {
+}
+
+impl WriteAheadLog for OnDiskWriteAheadLog {
+    type ReplayIterator<'a> = OnDiskReplayIterator<'a>;
+
+    fn append(&mut self, transaction: &Transaction) -> Result<()> {
+        writeln!(self.file, "{}", serde_json::to_string(transaction)?)?;
+        self.file.sync_data()?;
+        Ok(())
+    }
+
+    fn replay(&mut self) -> Self::ReplayIterator<'_> {
         let _ = self.file.rewind();
         OnDiskReplayIterator {
             reader: BufReader::new(&mut self.file),
             error: false,
         }
-    }
-}
-
-impl WriteAheadLog for OnDiskWriteAheadLog {
-    fn append(&mut self, transaction: &Transaction) -> Result<()> {
-        writeln!(self.file, "{}", serde_json::to_string(transaction)?)?;
-        self.file.sync_data()?;
-        Ok(())
     }
 }
 
@@ -166,7 +177,7 @@ impl<W: WriteAheadLog> Server<W> {
         self.transaction_id += 1;
         self.write_ahead_log.append(&transaction)?;
         let result = self.state.apply(&transaction);
-        Ok(result) //self.format(result)
+        Ok(result)
     }
 
     fn parse(query: &str) -> Command {
