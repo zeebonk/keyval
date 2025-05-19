@@ -171,13 +171,11 @@ impl<W: WriteAheadLog> Server<W> {
 
     fn parse(query: &str) -> Command {
         let parts: Vec<&str> = query.split_whitespace().collect();
-        match parts[0] {
-            "GET" => Command::Get {
-                key: parts[1].into(),
-            },
-            "SET" => Command::Set {
-                key: parts[1].into(),
-                value: parts[2].into(),
+        match parts[..] {
+            ["GET", key] => Command::Get { key: key.into() },
+            ["SET", key, value] => Command::Set {
+                key: key.into(),
+                value: value.into(),
             },
             _ => Command::Nop,
         }
