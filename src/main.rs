@@ -27,7 +27,7 @@ trait WriteAheadLog {
     where
         Self: 'a;
 
-    fn replay(&mut self) -> Self::ReplayIterator<'_>;
+    fn replay(&mut self) -> Result<Self::ReplayIterator<'_>>;
 
     fn append(&mut self, transaction: &Transaction) -> Result<()>;
 }
@@ -65,10 +65,10 @@ impl WriteAheadLog for InMemoryWriteAheadLog {
         Ok(())
     }
 
-    fn replay(&mut self) -> Self::ReplayIterator<'_> {
-        InMemoryReplayIterator {
+    fn replay(&mut self) -> Result<Self::ReplayIterator<'_>> {
+        Ok(InMemoryReplayIterator {
             iter: self.data.iter(),
-        }
+        })
     }
 }
 
@@ -124,12 +124,12 @@ impl WriteAheadLog for OnDiskWriteAheadLog {
         Ok(())
     }
 
-    fn replay(&mut self) -> Self::ReplayIterator<'_> {
-        let _ = self.file.rewind();
-        OnDiskReplayIterator {
+    fn replay(&mut self) -> Result<Self::ReplayIterator<'_>> {
+        self.file.rewind()?;
+        Ok(OnDiskReplayIterator {
             reader: BufReader::new(&mut self.file),
             error: false,
-        }
+        })
     }
 }
 
@@ -169,7 +169,7 @@ impl<W: WriteAheadLog> Server<W> {
     }
 
     fn recover(&mut self) -> Result<()> {
-        for result in self.write_ahead_log.replay() {
+        for result in self.write_ahead_log.replay()? {
             let transaction = result?;
             self.state.apply(&transaction);
             self.transaction_id = transaction.id;
