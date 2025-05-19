@@ -168,6 +168,16 @@ impl<W: WriteAheadLog> Server<W> {
         }
     }
 
+    fn recover(&mut self) -> Result<()> {
+        for result in self.write_ahead_log.replay() {
+            let transaction = result?;
+            self.state.apply(&transaction);
+            self.transaction_id = transaction.id;
+        }
+        self.transaction_id += 1;
+        Result::Ok(())
+    }
+
     fn execute(&mut self, query: &str) -> Result<String> {
         let command = Self::parse(query);
         let transaction = Transaction {
@@ -208,13 +218,10 @@ fn main() -> Result<()> {
     );
 
     let mut s = Server::new(w);
+    s.recover()?;
 
     s.execute("SET my_key 3")?;
     println!("{}", s.execute("GET my_key")?);
-
-    for x in s.write_ahead_log.replay() {
-        println!("REPLAY: {:?}", x);
-    }
 
     s.execute("SET somekey 4")?;
     println!("{}", s.execute("GET my_key")?);
