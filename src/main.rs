@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
@@ -172,10 +172,29 @@ impl<W: WriteAheadLog> Server<W> {
     fn recover(&mut self) -> Result<()> {
         for result in self.write_ahead_log.replay()? {
             let transaction = result?;
-            self.state.apply(&transaction);
-            self.transaction_id = transaction.id;
+
+            match (transaction.id, self.transaction_id) {
+                (loaded, internal) if loaded < internal => {
+                    warn!(
+                        "Skipping recovery of transaction {}, already applied",
+                        transaction.id
+                    );
+                    continue;
+                }
+                (loaded, internal) if loaded > internal => {
+                    return Err(anyhow!(
+                        "Unexpected transaction ID: got {}, expected {}",
+                        transaction.id,
+                        self.transaction_id
+                    ));
+                }
+                _ => {
+                    self.state.apply(&transaction);
+                    self.transaction_id += 1;
+                    info!("Successfully recovered transaction {}", transaction.id);
+                }
+            }
         }
-        self.transaction_id += 1;
         Ok(())
     }
 
@@ -234,5 +253,8 @@ fn main() -> Result<()> {
     println!("{}", s.execute("GET my_key")?);
 
     println!("{:?}", s);
+
+    s.recover()?;
+
     Ok(())
 }
