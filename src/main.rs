@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 use anyhow::Result;
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
 use std::{
@@ -204,6 +205,12 @@ impl<W: WriteAheadLog> Server<W> {
 }
 
 fn main() -> Result<()> {
+    env_logger::Builder::from_default_env()
+        .format_file(true)
+        .format_line_number(true)
+        .format_target(false)
+        .init();
+
     // In memory
     // let w = InMemoryWriteAheadLog::new();
 
